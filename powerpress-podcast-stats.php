@@ -188,10 +188,6 @@ class PowerPress_Podcast_Stats {
         }
     }
 
-    /**
-     * COMPREHENSIVE PLATFORM DETECTION
-     * Based on real-world podcast app user agents
-     */
     private function ppps_detect_platform($user_agent) {
         if (empty($user_agent)) {
             return 'Unknown';
@@ -199,287 +195,127 @@ class PowerPress_Podcast_Stats {
 
         error_log("PPPS DETECT: {$user_agent}");
 
-        // ====================
-        // APPLE ECOSYSTEM
-        // ====================
         if (preg_match('/iTMS|AppleCoreMedia|Podcasts\/|iTunes/i', $user_agent)) {
             return 'Apple Podcasts';
         }
-
-        // ====================
-        // SPOTIFY
-        // ====================
         if (preg_match('/Spotify/i', $user_agent)) {
             return 'Spotify';
         }
-
-        // ====================
-        // GOOGLE
-        // ====================
         if (preg_match('/Google-Podcast|GoogleChirp|Google Podcasts/i', $user_agent)) {
             return 'Google Podcasts';
         }
         if (preg_match('/YouTube/i', $user_agent) && !preg_match('/bot|crawler/i', $user_agent)) {
             return 'YouTube Music';
         }
-
-        // ====================
-        // POCKET CASTS
-        // ====================
-        // Real UA: "Pocket Casts", "PocketCasts", "pktc"
         if (preg_match('/Pocket[\s\-]?Casts|PocketCasts|pktc/i', $user_agent)) {
             return 'Pocket Casts';
         }
-
-        // ====================
-        // AMAZON
-        // ====================
         if (preg_match('/Amazon[\s\-]?Music|AmazonMusic|Alexa/i', $user_agent)) {
             return 'Amazon Music';
         }
-
-        // ====================
-        // PODIMO
-        // ====================
         if (preg_match('/Podimo/i', $user_agent)) {
             return 'Podimo';
         }
-
-        // ====================
-        // iVOOX
-        // ====================
         if (preg_match('/iVoox/i', $user_agent)) {
             return 'iVoox';
         }
-
-        // ====================
-        // OVERCAST
-        // ====================
         if (preg_match('/Overcast/i', $user_agent)) {
             return 'Overcast';
         }
-
-        // ====================
-        // CASTRO
-        // ====================
         if (preg_match('/Castro/i', $user_agent)) {
             return 'Castro';
         }
-
-        // ====================
-        // CASTBOX
-        // ====================
         if (preg_match('/Castbox/i', $user_agent)) {
             return 'Castbox';
         }
-
-        // ====================
-        // PODCAST ADDICT
-        // ====================
         if (preg_match('/Podcast[\s\-]?Addict|PodcastAddict/i', $user_agent)) {
             return 'Podcast Addict';
         }
-
-        // ====================
-        // PLAYER FM
-        // ====================
         if (preg_match('/Player[\s\-]?FM|PlayerFM/i', $user_agent)) {
             return 'Player FM';
         }
-
-        // ====================
-        // STITCHER
-        // ====================
         if (preg_match('/Stitcher/i', $user_agent)) {
             return 'Stitcher';
         }
-
-        // ====================
-        // TUNEIN
-        // ====================
         if (preg_match('/TuneIn/i', $user_agent)) {
             return 'TuneIn';
         }
-
-        // ====================
-        // DEEZER
-        // ====================
         if (preg_match('/Deezer/i', $user_agent)) {
             return 'Deezer';
         }
-
-        // ====================
-        // iHEARTRADIO
-        // ====================
         if (preg_match('/iHeartRadio|iHeart/i', $user_agent)) {
             return 'iHeartRadio';
         }
-
-        // ====================
-        // AUDIBLE
-        // ====================
         if (preg_match('/Audible/i', $user_agent)) {
             return 'Audible';
         }
-
-        // ====================
-        // ANTENNAPOD (Android)
-        // ====================
         if (preg_match('/AntennaPod/i', $user_agent)) {
             return 'AntennaPod';
         }
-
-        // ====================
-        // PODCAST REPUBLIC
-        // ====================
         if (preg_match('/Podcast[\s\-]?Republic|PodcastRepublic/i', $user_agent)) {
             return 'Podcast Republic';
         }
-
-        // ====================
-        // PODBEAN
-        // ====================
         if (preg_match('/Podbean/i', $user_agent)) {
             return 'Podbean';
         }
-
-        // ====================
-        // DOWNCAST
-        // ====================
         if (preg_match('/Downcast/i', $user_agent)) {
             return 'Downcast';
         }
-
-        // ====================
-        // ICATCHER
-        // ====================
         if (preg_match('/iCatcher/i', $user_agent)) {
             return 'iCatcher';
         }
-
-        // ====================
-        // PODCAST GURU
-        // ====================
         if (preg_match('/Podcast[\s\-]?Guru/i', $user_agent)) {
             return 'Podcast Guru';
         }
-
-        // ====================
-        // FOUNTAIN (Bitcoin podcast app)
-        // ====================
         if (preg_match('/Fountain/i', $user_agent)) {
             return 'Fountain';
         }
-
-        // ====================
-        // CURIOCASTER
-        // ====================
         if (preg_match('/Curiocaster/i', $user_agent)) {
             return 'Curiocaster';
         }
-
-        // ====================
-        // PODFRIEND
-        // ====================
         if (preg_match('/Podfriend/i', $user_agent)) {
             return 'Podfriend';
         }
-
-        // ====================
-        // LUMINARY
-        // ====================
         if (preg_match('/Luminary/i', $user_agent)) {
             return 'Luminary';
         }
-
-        // ====================
-        // SPREAKER
-        // ====================
         if (preg_match('/Spreaker/i', $user_agent)) {
             return 'Spreaker';
         }
-
-        // ====================
-        // ACAST
-        // ====================
         if (preg_match('/Acast/i', $user_agent)) {
             return 'Acast';
         }
-
-        // ====================
-        // PODCHASER
-        // ====================
         if (preg_match('/Podchaser/i', $user_agent)) {
             return 'Podchaser';
         }
-
-        // ====================
-        // WONDERY
-        // ====================
         if (preg_match('/Wondery/i', $user_agent)) {
             return 'Wondery';
         }
-
-        // ====================
-        // PANDORA
-        // ====================
         if (preg_match('/Pandora/i', $user_agent)) {
             return 'Pandora';
         }
-
-        // ====================
-        // HIMALAYA
-        // ====================
         if (preg_match('/Himalaya/i', $user_agent)) {
             return 'Himalaya';
         }
-
-        // ====================
-        // PODCAST INDEX (Podcasting 2.0)
-        // ====================
         if (preg_match('/PodcastIndex|podcastindex/i', $user_agent)) {
             return 'Podcast Index';
         }
-
-        // ====================
-        // FEED READERS & AGGREGATORS
-        // ====================
         if (preg_match('/Feedly|Feedbin|NewsBlur|Inoreader|FeedMaster|FeedReader|RSS/i', $user_agent)) {
             return 'RSS Reader';
         }
-
-        // ====================
-        // BOTS & CRAWLERS
-        // ====================
         if (preg_match('/bot|crawler|spider|slurp|bingpreview|googlebot|facebookexternalhit/i', $user_agent)) {
             return 'Bot/Crawler';
         }
-
-        // ====================
-        // HTTP LIBRARIES
-        // ====================
         if (preg_match('/^(axios|curl|wget|python|go-http|java|okhttp|apache-httpclient)/i', $user_agent)) {
             return 'HTTP Library';
         }
-
-        // ====================
-        // WORDPRESS
-        // ====================
         if (preg_match('/WordPress/i', $user_agent)) {
             return 'WordPress';
         }
-
-        // ====================
-        // WEB BROWSERS
-        // ====================
         if (preg_match('/(Chrome|Firefox|Safari|Edge|Opera)/i', $user_agent) &&
             !preg_match('/(mobile|android|iphone|ipad)/i', $user_agent)) {
             return 'Web Browser';
         }
-
-        // ====================
-        // MOBILE BROWSERS
-        // ====================
         if (preg_match('/(mobile|android|iphone|ipad)/i', $user_agent) &&
             preg_match('/(Chrome|Firefox|Safari|Edge)/i', $user_agent)) {
             return 'Mobile Browser';
@@ -509,13 +345,13 @@ class PowerPress_Podcast_Stats {
         global $wpdb;
         $response = wp_remote_get($feed_url, array('timeout' => 10));
         if (is_wp_error($response)) {
-            return false;
+            return 0;
         }
         $body = wp_remote_retrieve_body($response);
         libxml_use_internal_errors(true);
         $xml = simplexml_load_string($body);
         if ($xml === false) {
-            return false;
+            return 0;
         }
 
         $namespaces = $xml->getNamespaces(true);
