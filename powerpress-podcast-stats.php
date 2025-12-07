@@ -1,14 +1,15 @@
 <?php
 /**
  * Plugin Name: PowerPress Podcast Stats
- * Plugin URI: https://github.com/yourusername/powerpress-podcast-stats
- * Description: Track RSS feed access statistics for PowerPress podcasts with geolocation data
- * Version: 1.1.0
+ * Plugin URI: https://github.com/flabernardez/powerpress-podcast-stats
+ * Description: Track RSS feed access statistics for PowerPress podcasts with platform detection
+ * Version: 1.5.0
  * Author: Flavia Bernárdez Rodríguez
  * Author URI: https://flabernardez.com
  * License: GPL v2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain: powerpress-podcast-stats
+ * Domain Path: /languages
  * Requires at least: 5.0
  * Requires PHP: 7.2
  */
@@ -19,7 +20,7 @@ if (!defined('ABSPATH')) {
 }
 
 // Define plugin constants
-define('PPPS_VERSION', '1.1.0');
+define('PPPS_VERSION', '1.5.0');
 define('PPPS_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('PPPS_PLUGIN_URL', plugin_dir_url(__FILE__));
 
@@ -27,8 +28,10 @@ class PowerPress_Podcast_Stats {
 
     private static $instance = null;
     private $table_name;
+    private $feeds_table;
+    private $episodes_table;
 
-    public static function get_instance() {
+    public static function ppps_get_instance() {
         if (null === self::$instance) {
             self::$instance = new self();
         }
@@ -39,625 +42,718 @@ class PowerPress_Podcast_Stats {
         global $wpdb;
         $this->table_name = $wpdb->prefix . 'powerpress_feed_stats';
         $this->feeds_table = $wpdb->prefix . 'powerpress_registered_feeds';
+        $this->episodes_table = $wpdb->prefix . 'powerpress_episodes';
 
-        // Activation/Deactivation hooks
-        register_activation_hook(__FILE__, array($this, 'activate'));
-        register_deactivation_hook(__FILE__, array($this, 'deactivate'));
-
-        // Admin hooks
-        add_action('admin_menu', array($this, 'add_admin_menu'));
-        add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_scripts'));
-
-        // Track feed requests
-        add_action('template_redirect', array($this, 'track_feed_access'), 1);
-
-        // AJAX handlers
-        add_action('wp_ajax_ppps_get_stats', array($this, 'ajax_get_stats'));
-        add_action('wp_ajax_ppps_detect_feeds', array($this, 'ajax_detect_feeds'));
-        add_action('wp_ajax_ppps_save_manual_feed', array($this, 'ajax_save_manual_feed'));
+        $this->ppps_check_database();
+        add_action('plugins_loaded', array($this, 'ppps_load_textdomain'));
+        register_activation_hook(__FILE__, array($this, 'ppps_activate'));
+        register_deactivation_hook(__FILE__, array($this, 'ppps_deactivate'));
+        add_action('admin_menu', array($this, 'ppps_add_admin_menu'));
+        add_action('admin_enqueue_scripts', array($this, 'ppps_enqueue_admin_scripts'));
+        add_action('template_redirect', array($this, 'ppps_track_feed_access'), 1);
+        add_action('wp_ajax_ppps_get_overview', array($this, 'ppps_ajax_get_overview'));
+        add_action('wp_ajax_ppps_get_podcast_stats', array($this, 'ppps_ajax_get_podcast_stats'));
+        add_action('wp_ajax_ppps_add_feed', array($this, 'ppps_ajax_add_feed'));
+        add_action('wp_ajax_ppps_delete_feed', array($this, 'ppps_ajax_delete_feed'));
+        add_action('wp_ajax_ppps_refresh_episodes', array($this, 'ppps_ajax_refresh_episodes'));
     }
 
-    /**
-     * Plugin activation
-     */
-    public function activate() {
+    public function ppps_load_textdomain() {
+        load_plugin_textdomain('powerpress-podcast-stats', false, dirname(plugin_basename(__FILE__)) . '/languages');
+    }
+
+    public function ppps_check_database() {
         global $wpdb;
+        $installed_version = get_option('ppps_db_version');
+        if ($installed_version !== PPPS_VERSION) {
+            $this->ppps_create_tables();
+            update_option('ppps_db_version', PPPS_VERSION);
+        }
+    }
 
+    private function ppps_create_tables() {
+        global $wpdb;
         $charset_collate = $wpdb->get_charset_collate();
+        require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
 
-        // Stats table
-        $sql = "CREATE TABLE IF NOT EXISTS {$this->table_name} (
+        $sql = "CREATE TABLE {$this->table_name} (
             id bigint(20) NOT NULL AUTO_INCREMENT,
             feed_slug varchar(255) NOT NULL,
             feed_name varchar(255) NOT NULL,
             podcast_id bigint(20) DEFAULT 0,
+            episode_id bigint(20) DEFAULT 0,
+            platform varchar(100) DEFAULT '',
             user_agent text,
             ip_hash varchar(64) NOT NULL,
-            country varchar(100) DEFAULT '',
-            city varchar(100) DEFAULT '',
             access_time datetime DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY  (id),
             KEY feed_slug (feed_slug),
             KEY podcast_id (podcast_id),
+            KEY episode_id (episode_id),
+            KEY platform (platform),
             KEY access_time (access_time),
-            KEY ip_hash (ip_hash),
-            KEY country (country)
+            KEY ip_hash (ip_hash)
         ) $charset_collate;";
-
-        require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
         dbDelta($sql);
 
-        // Registered feeds table
-        $sql_feeds = "CREATE TABLE IF NOT EXISTS {$this->feeds_table} (
+        $sql_feeds = "CREATE TABLE {$this->feeds_table} (
             id bigint(20) NOT NULL AUTO_INCREMENT,
             podcast_name varchar(255) NOT NULL,
             feed_url varchar(500) NOT NULL,
             feed_slug varchar(255) NOT NULL,
-            source varchar(50) DEFAULT 'manual',
+            thumbnail_url varchar(500) DEFAULT '',
             created_at datetime DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY  (id),
+            UNIQUE KEY feed_url (feed_url),
             UNIQUE KEY feed_slug (feed_slug),
             KEY podcast_name (podcast_name)
         ) $charset_collate;";
-
         dbDelta($sql_feeds);
 
-        // Set version
+        $sql_episodes = "CREATE TABLE {$this->episodes_table} (
+            id bigint(20) NOT NULL AUTO_INCREMENT,
+            podcast_id bigint(20) NOT NULL,
+            episode_title varchar(500) NOT NULL,
+            episode_guid varchar(500) NOT NULL,
+            episode_url varchar(500) DEFAULT '',
+            pub_date datetime DEFAULT NULL,
+            created_at datetime DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY  (id),
+            KEY podcast_id (podcast_id),
+            UNIQUE KEY unique_episode (podcast_id, episode_guid)
+        ) $charset_collate;";
+        dbDelta($sql_episodes);
+    }
+
+    public function ppps_activate() {
+        $this->ppps_create_tables();
         add_option('ppps_db_version', PPPS_VERSION);
     }
 
-    /**
-     * Plugin deactivation
-     */
-    public function deactivate() {
-        // Nothing to do on deactivation, we keep the data
-    }
+    public function ppps_deactivate() {}
 
-    /**
-     * Track feed access
-     */
-    public function track_feed_access() {
-        // Only track feed requests
+    public function ppps_track_feed_access() {
         if (!is_feed()) {
             return;
         }
 
         global $wpdb;
+        $current_url = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? "https" : "http") . "://{$_SERVER['HTTP_HOST']}{$_SERVER['REQUEST_URI']}";
+        $current_url_clean = rtrim(strtok($current_url, '?'), '/');
 
-        // Get feed information
-        $feed_slug = get_query_var('feed');
-
-        // If it's a podcast feed (PowerPress creates custom feeds)
-        if (empty($feed_slug) || $feed_slug === 'feed') {
-            $feed_slug = 'podcast'; // Default podcast feed
-        }
-
-        // Check if this feed is registered
         $registered_feed = $wpdb->get_row($wpdb->prepare(
-            "SELECT * FROM {$this->feeds_table} WHERE feed_slug = %s",
-            $feed_slug
+            "SELECT * FROM {$this->feeds_table} WHERE feed_url = %s OR feed_url = %s",
+            $current_url_clean,
+            $current_url_clean . '/'
         ));
 
-        // If not registered, try to auto-register it
-        if (!$registered_feed) {
-            $this->auto_register_feed($feed_slug);
-            $registered_feed = $wpdb->get_row($wpdb->prepare(
-                "SELECT * FROM {$this->feeds_table} WHERE feed_slug = %s",
-                $feed_slug
-            ));
-        }
-
-        // If still not found, skip (not a registered podcast feed)
         if (!$registered_feed) {
             return;
         }
 
         $podcast_id = $registered_feed->id;
         $feed_name = $registered_feed->podcast_name;
-
-        // Get user agent
+        $feed_slug = $registered_feed->feed_slug;
         $user_agent = isset($_SERVER['HTTP_USER_AGENT']) ? sanitize_text_field($_SERVER['HTTP_USER_AGENT']) : '';
-
-        // Get IP and create hash (for privacy)
-        $ip = $this->get_client_ip();
+        $platform = $this->ppps_detect_platform($user_agent);
+        $ip = $this->ppps_get_client_ip();
         $ip_hash = hash('sha256', $ip . wp_salt());
 
-        // Check if this IP already accessed this feed in the last hour (avoid duplicates)
         $recent_access = $wpdb->get_var($wpdb->prepare(
             "SELECT id FROM {$this->table_name} 
-            WHERE ip_hash = %s 
-            AND podcast_id = %d 
-            AND access_time > DATE_SUB(NOW(), INTERVAL 1 HOUR)
-            LIMIT 1",
-            $ip_hash,
-            $podcast_id
+            WHERE ip_hash = %s AND podcast_id = %d AND platform = %s
+            AND access_time > DATE_SUB(NOW(), INTERVAL 30 MINUTE) LIMIT 1",
+            $ip_hash, $podcast_id, $platform
         ));
 
-        // If no recent access, log this one
         if (!$recent_access) {
-            // Get geolocation data
-            $geo_data = $this->get_geolocation($ip);
-
-            // Insert the record
-            $wpdb->insert(
+            $result = $wpdb->insert(
                 $this->table_name,
                 array(
                     'feed_slug' => $feed_slug,
                     'feed_name' => $feed_name,
                     'podcast_id' => $podcast_id,
+                    'episode_id' => 0,
+                    'platform' => $platform,
                     'user_agent' => $user_agent,
                     'ip_hash' => $ip_hash,
-                    'country' => $geo_data['country'],
-                    'city' => $geo_data['city'],
                     'access_time' => current_time('mysql')
                 ),
-                array('%s', '%s', '%d', '%s', '%s', '%s', '%s', '%s')
+                array('%s', '%s', '%d', '%d', '%s', '%s', '%s', '%s')
             );
-        }
-    }
 
-    /**
-     * Auto-register a feed when accessed
-     */
-    private function auto_register_feed($feed_slug) {
-        global $wpdb;
-
-        // Get a readable feed name
-        $feed_name = $this->get_feed_name($feed_slug);
-        $feed_url = home_url('/feed/' . $feed_slug . '/');
-
-        // Only register if it seems like a podcast feed
-        if (strpos($feed_slug, 'podcast') !== false ||
-            is_category() ||
-            is_tax() ||
-            is_post_type_archive()) {
-
-            $wpdb->insert(
-                $this->feeds_table,
-                array(
-                    'podcast_name' => $feed_name,
-                    'feed_url' => $feed_url,
-                    'feed_slug' => $feed_slug,
-                    'source' => 'auto',
-                    'created_at' => current_time('mysql')
-                ),
-                array('%s', '%s', '%s', '%s', '%s')
-            );
-        }
-    }
-
-    /**
-     * Get client IP address
-     */
-    private function get_client_ip() {
-        $ip_keys = array(
-            'HTTP_CF_CONNECTING_IP', // CloudFlare
-            'HTTP_X_FORWARDED_FOR',
-            'HTTP_X_REAL_IP',
-            'REMOTE_ADDR'
-        );
-
-        foreach ($ip_keys as $key) {
-            if (isset($_SERVER[$key]) && filter_var($_SERVER[$key], FILTER_VALIDATE_IP)) {
-                return $_SERVER[$key];
+            if ($result) {
+                error_log("PPPS TRACKED: Podcast={$feed_name}, Platform={$platform}, UA=" . substr($user_agent, 0, 100));
             }
         }
+    }
 
+    /**
+     * COMPREHENSIVE PLATFORM DETECTION
+     * Based on real-world podcast app user agents
+     */
+    private function ppps_detect_platform($user_agent) {
+        if (empty($user_agent)) {
+            return 'Unknown';
+        }
+
+        error_log("PPPS DETECT: {$user_agent}");
+
+        // ====================
+        // APPLE ECOSYSTEM
+        // ====================
+        if (preg_match('/iTMS|AppleCoreMedia|Podcasts\/|iTunes/i', $user_agent)) {
+            return 'Apple Podcasts';
+        }
+
+        // ====================
+        // SPOTIFY
+        // ====================
+        if (preg_match('/Spotify/i', $user_agent)) {
+            return 'Spotify';
+        }
+
+        // ====================
+        // GOOGLE
+        // ====================
+        if (preg_match('/Google-Podcast|GoogleChirp|Google Podcasts/i', $user_agent)) {
+            return 'Google Podcasts';
+        }
+        if (preg_match('/YouTube/i', $user_agent) && !preg_match('/bot|crawler/i', $user_agent)) {
+            return 'YouTube Music';
+        }
+
+        // ====================
+        // POCKET CASTS
+        // ====================
+        // Real UA: "Pocket Casts", "PocketCasts", "pktc"
+        if (preg_match('/Pocket[\s\-]?Casts|PocketCasts|pktc/i', $user_agent)) {
+            return 'Pocket Casts';
+        }
+
+        // ====================
+        // AMAZON
+        // ====================
+        if (preg_match('/Amazon[\s\-]?Music|AmazonMusic|Alexa/i', $user_agent)) {
+            return 'Amazon Music';
+        }
+
+        // ====================
+        // PODIMO
+        // ====================
+        if (preg_match('/Podimo/i', $user_agent)) {
+            return 'Podimo';
+        }
+
+        // ====================
+        // iVOOX
+        // ====================
+        if (preg_match('/iVoox/i', $user_agent)) {
+            return 'iVoox';
+        }
+
+        // ====================
+        // OVERCAST
+        // ====================
+        if (preg_match('/Overcast/i', $user_agent)) {
+            return 'Overcast';
+        }
+
+        // ====================
+        // CASTRO
+        // ====================
+        if (preg_match('/Castro/i', $user_agent)) {
+            return 'Castro';
+        }
+
+        // ====================
+        // CASTBOX
+        // ====================
+        if (preg_match('/Castbox/i', $user_agent)) {
+            return 'Castbox';
+        }
+
+        // ====================
+        // PODCAST ADDICT
+        // ====================
+        if (preg_match('/Podcast[\s\-]?Addict|PodcastAddict/i', $user_agent)) {
+            return 'Podcast Addict';
+        }
+
+        // ====================
+        // PLAYER FM
+        // ====================
+        if (preg_match('/Player[\s\-]?FM|PlayerFM/i', $user_agent)) {
+            return 'Player FM';
+        }
+
+        // ====================
+        // STITCHER
+        // ====================
+        if (preg_match('/Stitcher/i', $user_agent)) {
+            return 'Stitcher';
+        }
+
+        // ====================
+        // TUNEIN
+        // ====================
+        if (preg_match('/TuneIn/i', $user_agent)) {
+            return 'TuneIn';
+        }
+
+        // ====================
+        // DEEZER
+        // ====================
+        if (preg_match('/Deezer/i', $user_agent)) {
+            return 'Deezer';
+        }
+
+        // ====================
+        // iHEARTRADIO
+        // ====================
+        if (preg_match('/iHeartRadio|iHeart/i', $user_agent)) {
+            return 'iHeartRadio';
+        }
+
+        // ====================
+        // AUDIBLE
+        // ====================
+        if (preg_match('/Audible/i', $user_agent)) {
+            return 'Audible';
+        }
+
+        // ====================
+        // ANTENNAPOD (Android)
+        // ====================
+        if (preg_match('/AntennaPod/i', $user_agent)) {
+            return 'AntennaPod';
+        }
+
+        // ====================
+        // PODCAST REPUBLIC
+        // ====================
+        if (preg_match('/Podcast[\s\-]?Republic|PodcastRepublic/i', $user_agent)) {
+            return 'Podcast Republic';
+        }
+
+        // ====================
+        // PODBEAN
+        // ====================
+        if (preg_match('/Podbean/i', $user_agent)) {
+            return 'Podbean';
+        }
+
+        // ====================
+        // DOWNCAST
+        // ====================
+        if (preg_match('/Downcast/i', $user_agent)) {
+            return 'Downcast';
+        }
+
+        // ====================
+        // ICATCHER
+        // ====================
+        if (preg_match('/iCatcher/i', $user_agent)) {
+            return 'iCatcher';
+        }
+
+        // ====================
+        // PODCAST GURU
+        // ====================
+        if (preg_match('/Podcast[\s\-]?Guru/i', $user_agent)) {
+            return 'Podcast Guru';
+        }
+
+        // ====================
+        // FOUNTAIN (Bitcoin podcast app)
+        // ====================
+        if (preg_match('/Fountain/i', $user_agent)) {
+            return 'Fountain';
+        }
+
+        // ====================
+        // CURIOCASTER
+        // ====================
+        if (preg_match('/Curiocaster/i', $user_agent)) {
+            return 'Curiocaster';
+        }
+
+        // ====================
+        // PODFRIEND
+        // ====================
+        if (preg_match('/Podfriend/i', $user_agent)) {
+            return 'Podfriend';
+        }
+
+        // ====================
+        // LUMINARY
+        // ====================
+        if (preg_match('/Luminary/i', $user_agent)) {
+            return 'Luminary';
+        }
+
+        // ====================
+        // SPREAKER
+        // ====================
+        if (preg_match('/Spreaker/i', $user_agent)) {
+            return 'Spreaker';
+        }
+
+        // ====================
+        // ACAST
+        // ====================
+        if (preg_match('/Acast/i', $user_agent)) {
+            return 'Acast';
+        }
+
+        // ====================
+        // PODCHASER
+        // ====================
+        if (preg_match('/Podchaser/i', $user_agent)) {
+            return 'Podchaser';
+        }
+
+        // ====================
+        // WONDERY
+        // ====================
+        if (preg_match('/Wondery/i', $user_agent)) {
+            return 'Wondery';
+        }
+
+        // ====================
+        // PANDORA
+        // ====================
+        if (preg_match('/Pandora/i', $user_agent)) {
+            return 'Pandora';
+        }
+
+        // ====================
+        // HIMALAYA
+        // ====================
+        if (preg_match('/Himalaya/i', $user_agent)) {
+            return 'Himalaya';
+        }
+
+        // ====================
+        // PODCAST INDEX (Podcasting 2.0)
+        // ====================
+        if (preg_match('/PodcastIndex|podcastindex/i', $user_agent)) {
+            return 'Podcast Index';
+        }
+
+        // ====================
+        // FEED READERS & AGGREGATORS
+        // ====================
+        if (preg_match('/Feedly|Feedbin|NewsBlur|Inoreader|FeedMaster|FeedReader|RSS/i', $user_agent)) {
+            return 'RSS Reader';
+        }
+
+        // ====================
+        // BOTS & CRAWLERS
+        // ====================
+        if (preg_match('/bot|crawler|spider|slurp|bingpreview|googlebot|facebookexternalhit/i', $user_agent)) {
+            return 'Bot/Crawler';
+        }
+
+        // ====================
+        // HTTP LIBRARIES
+        // ====================
+        if (preg_match('/^(axios|curl|wget|python|go-http|java|okhttp|apache-httpclient)/i', $user_agent)) {
+            return 'HTTP Library';
+        }
+
+        // ====================
+        // WORDPRESS
+        // ====================
+        if (preg_match('/WordPress/i', $user_agent)) {
+            return 'WordPress';
+        }
+
+        // ====================
+        // WEB BROWSERS
+        // ====================
+        if (preg_match('/(Chrome|Firefox|Safari|Edge|Opera)/i', $user_agent) &&
+            !preg_match('/(mobile|android|iphone|ipad)/i', $user_agent)) {
+            return 'Web Browser';
+        }
+
+        // ====================
+        // MOBILE BROWSERS
+        // ====================
+        if (preg_match('/(mobile|android|iphone|ipad)/i', $user_agent) &&
+            preg_match('/(Chrome|Firefox|Safari|Edge)/i', $user_agent)) {
+            return 'Mobile Browser';
+        }
+
+        error_log("PPPS DETECT: No match, returning Other");
+        return 'Other';
+    }
+
+    private function ppps_get_client_ip() {
+        $ip_keys = array('HTTP_CF_CONNECTING_IP', 'HTTP_X_FORWARDED_FOR', 'HTTP_X_REAL_IP', 'REMOTE_ADDR');
+        foreach ($ip_keys as $key) {
+            if (isset($_SERVER[$key])) {
+                $ip = $_SERVER[$key];
+                if (strpos($ip, ',') !== false) {
+                    $ip = trim(explode(',', $ip)[0]);
+                }
+                if (filter_var($ip, FILTER_VALIDATE_IP)) {
+                    return $ip;
+                }
+            }
+        }
         return '0.0.0.0';
     }
 
-    /**
-     * Get geolocation data from IP
-     */
-    private function get_geolocation($ip) {
-        $default = array(
-            'country' => '',
-            'city' => ''
-        );
-
-        // Don't geolocate local IPs
-        if ($ip === '0.0.0.0' || $ip === '127.0.0.1' || strpos($ip, '192.168.') === 0) {
-            return $default;
-        }
-
-        // Check transient cache first (cache for 7 days)
-        $cache_key = 'ppps_geo_' . md5($ip);
-        $cached = get_transient($cache_key);
-
-        if ($cached !== false) {
-            return $cached;
-        }
-
-        // Call ip-api.com (free, no key required, 45 req/min)
-        $response = wp_remote_get("http://ip-api.com/json/{$ip}?fields=status,country,city", array(
-            'timeout' => 3,
-            'sslverify' => false
-        ));
-
+    private function ppps_parse_feed($feed_url, $podcast_id) {
+        global $wpdb;
+        $response = wp_remote_get($feed_url, array('timeout' => 10));
         if (is_wp_error($response)) {
-            return $default;
+            return false;
         }
-
         $body = wp_remote_retrieve_body($response);
-        $data = json_decode($body, true);
-
-        if (!empty($data) && $data['status'] === 'success') {
-            $geo_data = array(
-                'country' => isset($data['country']) ? sanitize_text_field($data['country']) : '',
-                'city' => isset($data['city']) ? sanitize_text_field($data['city']) : ''
-            );
-
-            // Cache the result
-            set_transient($cache_key, $geo_data, 7 * DAY_IN_SECONDS);
-
-            return $geo_data;
+        libxml_use_internal_errors(true);
+        $xml = simplexml_load_string($body);
+        if ($xml === false) {
+            return false;
         }
 
-        return $default;
-    }
+        $namespaces = $xml->getNamespaces(true);
+        $thumbnail_url = '';
 
-    /**
-     * Get a readable name for the feed
-     */
-    private function get_feed_name($feed_slug) {
-        // Try to get PowerPress feed settings
-        $powerpress_settings = get_option('powerpress_general');
-
-        // Check if it's a category or taxonomy feed
-        if (is_category() || is_tax()) {
-            $term = get_queried_object();
-            return $term->name . ' Podcast';
-        }
-
-        // Check if it's a custom post type feed
-        if (is_post_type_archive()) {
-            $post_type = get_query_var('post_type');
-            $post_type_obj = get_post_type_object($post_type);
-            if ($post_type_obj) {
-                return $post_type_obj->labels->name . ' Podcast';
+        if (isset($namespaces['itunes'])) {
+            $itunes = $xml->channel->children($namespaces['itunes']);
+            if (isset($itunes->image)) {
+                $attrs = $itunes->image->attributes();
+                if (isset($attrs['href'])) {
+                    $thumbnail_url = (string) $attrs['href'];
+                }
             }
         }
 
-        // Default feed names
-        $feed_names = array(
-            'podcast' => 'Main Podcast Feed',
-            'rss2' => 'RSS 2.0 Feed',
-            'rss' => 'RSS Feed',
-            'atom' => 'Atom Feed',
-        );
+        if (empty($thumbnail_url) && isset($xml->channel->image->url)) {
+            $thumbnail_url = (string) $xml->channel->image->url;
+        }
 
-        return isset($feed_names[$feed_slug]) ? $feed_names[$feed_slug] : ucfirst($feed_slug) . ' Feed';
+        if (!empty($thumbnail_url)) {
+            $wpdb->update($this->feeds_table, array('thumbnail_url' => $thumbnail_url), array('id' => $podcast_id), array('%s'), array('%d'));
+        }
+
+        $episodes_added = 0;
+        foreach ($xml->channel->item as $item) {
+            $title = (string) $item->title;
+            $guid = (string) $item->guid;
+            $pub_date = isset($item->pubDate) ? date('Y-m-d H:i:s', strtotime((string) $item->pubDate)) : '';
+            $episode_url = '';
+
+            if (isset($item->enclosure)) {
+                $attrs = $item->enclosure->attributes();
+                if (isset($attrs['url'])) {
+                    $episode_url = (string) $attrs['url'];
+                }
+            }
+
+            if (empty($guid)) {
+                $guid = md5($title . $episode_url);
+            }
+
+            $existing = $wpdb->get_var($wpdb->prepare(
+                "SELECT id FROM {$this->episodes_table} WHERE podcast_id = %d AND episode_guid = %s",
+                $podcast_id, $guid
+            ));
+
+            if (!$existing) {
+                $result = $wpdb->insert(
+                    $this->episodes_table,
+                    array(
+                        'podcast_id' => $podcast_id,
+                        'episode_title' => $title,
+                        'episode_guid' => $guid,
+                        'episode_url' => $episode_url,
+                        'pub_date' => $pub_date,
+                        'created_at' => current_time('mysql')
+                    ),
+                    array('%d', '%s', '%s', '%s', '%s', '%s')
+                );
+                if ($result) $episodes_added++;
+            }
+        }
+        return $episodes_added;
     }
 
-    /**
-     * Add admin menu
-     */
-    public function add_admin_menu() {
+    public function ppps_add_admin_menu() {
         add_menu_page(
             __('Podcast Stats', 'powerpress-podcast-stats'),
             __('Podcast Stats', 'powerpress-podcast-stats'),
             'manage_options',
             'powerpress-podcast-stats',
-            array($this, 'render_admin_page'),
+            array($this, 'ppps_render_admin_page'),
             'dashicons-chart-area',
             30
         );
     }
 
-    /**
-     * Enqueue admin scripts and styles
-     */
-    public function enqueue_admin_scripts($hook) {
-        if ($hook !== 'toplevel_page_powerpress-podcast-stats') {
-            return;
-        }
+    public function ppps_enqueue_admin_scripts($hook) {
+        if ($hook !== 'toplevel_page_powerpress-podcast-stats') return;
 
-        wp_enqueue_style(
-            'ppps-admin-css',
-            PPPS_PLUGIN_URL . 'assets/admin.css',
-            array(),
-            PPPS_VERSION
-        );
-
-        wp_enqueue_script(
-            'ppps-admin-js',
-            PPPS_PLUGIN_URL . 'assets/admin.js',
-            array('jquery'),
-            PPPS_VERSION,
-            true
-        );
-
+        wp_enqueue_style('ppps-admin-css', PPPS_PLUGIN_URL . 'assets/admin.css', array(), PPPS_VERSION);
+        wp_enqueue_script('ppps-admin-js', PPPS_PLUGIN_URL . 'assets/admin.js', array('jquery'), PPPS_VERSION, true);
         wp_localize_script('ppps-admin-js', 'pppsData', array(
             'ajaxUrl' => admin_url('admin-ajax.php'),
-            'nonce' => wp_create_nonce('ppps_stats_nonce')
+            'nonce' => wp_create_nonce('ppps_stats_nonce'),
+            'strings' => array(
+                'confirmRemove' => __('Are you sure you want to remove this feed from statistics? The feed will continue to work, but it will no longer be tracked.', 'powerpress-podcast-stats'),
+                'fillAllFields' => __('Please fill in all fields.', 'powerpress-podcast-stats'),
+                'errorLoading' => __('Error loading statistics. Please try again.', 'powerpress-podcast-stats'),
+                'errorDeleting' => __('Error removing feed. Please try again.', 'powerpress-podcast-stats'),
+                'errorAdding' => __('Error adding feed. Please try again.', 'powerpress-podcast-stats'),
+                'adding' => __('Adding...', 'powerpress-podcast-stats'),
+                'addFeed' => __('Add Feed', 'powerpress-podcast-stats'),
+                'noData' => __('No data available', 'powerpress-podcast-stats'),
+                'accesses' => __('accesses', 'powerpress-podcast-stats'),
+            )
         ));
     }
 
-    /**
-     * Render admin page
-     */
-    public function render_admin_page() {
-        global $wpdb;
-
-        // Get registered feeds grouped by podcast
-        $feeds = $wpdb->get_results(
-            "SELECT * FROM {$this->feeds_table} ORDER BY podcast_name ASC, feed_slug ASC"
-        );
-
+    public function ppps_render_admin_page() {
         include PPPS_PLUGIN_DIR . 'templates/admin-page.php';
     }
 
-    /**
-     * AJAX handler to get stats
-     */
-    public function ajax_get_stats() {
+    public function ppps_ajax_get_overview() {
         check_ajax_referer('ppps_stats_nonce', 'nonce');
-
         if (!current_user_can('manage_options')) {
-            wp_send_json_error('Unauthorized');
+            wp_send_json_error(__('Unauthorized', 'powerpress-podcast-stats'));
         }
-
         global $wpdb;
+        $podcasts = $wpdb->get_results(
+            "SELECT f.id, f.podcast_name, f.feed_url, f.thumbnail_url, f.created_at, COUNT(s.id) as total_accesses
+            FROM {$this->feeds_table} f
+            LEFT JOIN {$this->table_name} s ON f.id = s.podcast_id
+            GROUP BY f.id ORDER BY f.podcast_name ASC"
+        );
+        wp_send_json_success(array('podcasts' => $podcasts));
+    }
 
+    public function ppps_ajax_get_podcast_stats() {
+        check_ajax_referer('ppps_stats_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(__('Unauthorized', 'powerpress-podcast-stats'));
+        }
+        global $wpdb;
         $podcast_id = isset($_POST['podcast_id']) ? intval($_POST['podcast_id']) : 0;
-        $time_filter = isset($_POST['time_filter']) ? sanitize_text_field($_POST['time_filter']) : 'all';
-        $start_date = isset($_POST['start_date']) ? sanitize_text_field($_POST['start_date']) : '';
-        $end_date = isset($_POST['end_date']) ? sanitize_text_field($_POST['end_date']) : '';
-
-        // Build WHERE clause
-        $where = array('1=1');
-
-        if ($podcast_id > 0) {
-            $where[] = $wpdb->prepare('podcast_id = %d', $podcast_id);
+        if ($podcast_id <= 0) {
+            wp_send_json_error(__('Invalid podcast ID', 'powerpress-podcast-stats'));
         }
 
-        // Time filters
-        if ($time_filter === 'custom' && !empty($start_date) && !empty($end_date)) {
-            $where[] = $wpdb->prepare(
-                'access_time BETWEEN %s AND %s',
-                $start_date . ' 00:00:00',
-                $end_date . ' 23:59:59'
-            );
-        } elseif ($time_filter !== 'all') {
-            $interval_map = array(
-                'week' => '7 DAY',
-                'month' => '30 DAY',
-                'year' => '365 DAY'
-            );
-
-            if (isset($interval_map[$time_filter])) {
-                $where[] = "access_time > DATE_SUB(NOW(), INTERVAL {$interval_map[$time_filter]})";
-            }
-        }
-
-        $where_clause = implode(' AND ', $where);
-
-        // Get total accesses
-        $total_accesses = $wpdb->get_var(
-            "SELECT COUNT(*) FROM {$this->table_name} WHERE {$where_clause}"
-        );
-
-        // Get accesses by feed (within the selected podcast)
-        $by_feed = $wpdb->get_results(
-            "SELECT feed_name, COUNT(*) as count 
-            FROM {$this->table_name} 
-            WHERE {$where_clause}
-            GROUP BY feed_name
-            ORDER BY count DESC"
-        );
-
-        // Get accesses by country
-        $by_country = $wpdb->get_results(
-            "SELECT country, COUNT(*) as count 
-            FROM {$this->table_name} 
-            WHERE {$where_clause} AND country != ''
-            GROUP BY country
-            ORDER BY count DESC
-            LIMIT 20"
-        );
-
-        // Get accesses by city
-        $by_city = $wpdb->get_results(
-            "SELECT city, country, COUNT(*) as count 
-            FROM {$this->table_name} 
-            WHERE {$where_clause} AND city != ''
-            GROUP BY city, country
-            ORDER BY count DESC
-            LIMIT 20"
-        );
-
-        // Get top user agents (podcast apps)
-        $by_agent = $wpdb->get_results(
-            "SELECT user_agent, COUNT(*) as count 
-            FROM {$this->table_name} 
-            WHERE {$where_clause} AND user_agent != ''
-            GROUP BY user_agent
-            ORDER BY count DESC
-            LIMIT 10"
-        );
-
-        // Get timeline data (last 30 days)
-        $timeline = $wpdb->get_results(
-            "SELECT DATE(access_time) as date, COUNT(*) as count 
-            FROM {$this->table_name} 
-            WHERE {$where_clause}
-            GROUP BY DATE(access_time)
-            ORDER BY date DESC
-            LIMIT 30"
-        );
+        $total_accesses = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$this->table_name} WHERE podcast_id = %d", $podcast_id
+        ));
+        $by_platform = $wpdb->get_results($wpdb->prepare(
+            "SELECT platform, COUNT(*) as count FROM {$this->table_name} 
+            WHERE podcast_id = %d AND platform != '' GROUP BY platform ORDER BY count DESC", $podcast_id
+        ));
+        $by_episode = $wpdb->get_results($wpdb->prepare(
+            "SELECT e.episode_title, COUNT(s.id) as count FROM {$this->episodes_table} e
+            LEFT JOIN {$this->table_name} s ON e.id = s.episode_id WHERE e.podcast_id = %d
+            GROUP BY e.id, e.episode_title HAVING count > 0 ORDER BY count DESC LIMIT 20", $podcast_id
+        ));
+        $podcast = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->feeds_table} WHERE id = %d", $podcast_id));
 
         wp_send_json_success(array(
+            'podcast' => $podcast,
             'total_accesses' => (int) $total_accesses,
-            'by_feed' => $by_feed,
-            'by_country' => $by_country,
-            'by_city' => $by_city,
-            'by_agent' => $by_agent,
-            'timeline' => array_reverse($timeline)
+            'by_platform' => $by_platform,
+            'by_episode' => $by_episode
         ));
     }
 
-    /**
-     * AJAX handler to detect PowerPress feeds
-     */
-    public function ajax_detect_feeds() {
+    public function ppps_ajax_add_feed() {
         check_ajax_referer('ppps_stats_nonce', 'nonce');
-
         if (!current_user_can('manage_options')) {
-            wp_send_json_error('Unauthorized');
+            wp_send_json_error(__('Unauthorized', 'powerpress-podcast-stats'));
         }
-
-        $detected_feeds = array();
-
-        // Check if PowerPress is active
-        if (!function_exists('powerpress_get_settings')) {
-            wp_send_json_error('PowerPress plugin not detected. Please install and activate PowerPress.');
-        }
-
-        // Get PowerPress settings
-        $powerpress_settings = get_option('powerpress_general', array());
-
-        // Main podcast feed
-        $detected_feeds[] = array(
-            'name' => get_bloginfo('name') . ' - Main Podcast',
-            'url' => home_url('/feed/podcast/'),
-            'slug' => 'podcast',
-            'source' => 'powerpress'
-        );
-
-        // Category podcasting
-        $cat_casting = get_option('powerpress_cat_casting', array());
-        if (!empty($cat_casting)) {
-            foreach ($cat_casting as $cat_id => $settings) {
-                $category = get_category($cat_id);
-                if ($category) {
-                    $detected_feeds[] = array(
-                        'name' => $category->name . ' Podcast',
-                        'url' => get_category_feed_link($cat_id),
-                        'slug' => 'category_' . $cat_id,
-                        'source' => 'powerpress'
-                    );
-                }
-            }
-        }
-
-        // Taxonomy podcasting
-        $taxonomies = get_option('powerpress_taxonomy_podcasting', array());
-        if (!empty($taxonomies)) {
-            foreach ($taxonomies as $tax_slug => $terms) {
-                if (!empty($terms)) {
-                    foreach ($terms as $term_id => $settings) {
-                        $term = get_term($term_id, $tax_slug);
-                        if ($term && !is_wp_error($term)) {
-                            $detected_feeds[] = array(
-                                'name' => $term->name . ' Podcast',
-                                'url' => get_term_feed_link($term_id, $tax_slug),
-                                'slug' => $tax_slug . '_' . $term_id,
-                                'source' => 'powerpress'
-                            );
-                        }
-                    }
-                }
-            }
-        }
-
-        // Post type podcasting
-        $post_types = get_option('powerpress_posttype_podcasting', array());
-        if (!empty($post_types)) {
-            foreach ($post_types as $post_type => $settings) {
-                $post_type_obj = get_post_type_object($post_type);
-                if ($post_type_obj) {
-                    $detected_feeds[] = array(
-                        'name' => $post_type_obj->labels->name . ' Podcast',
-                        'url' => get_post_type_archive_feed_link($post_type),
-                        'slug' => 'post_type_' . $post_type,
-                        'source' => 'powerpress'
-                    );
-                }
-            }
-        }
-
-        if (empty($detected_feeds)) {
-            wp_send_json_error('No PowerPress feeds detected. You may need to configure PowerPress or add feeds manually.');
-        }
-
-        wp_send_json_success($detected_feeds);
-    }
-
-    /**
-     * AJAX handler to save manual feed
-     */
-    public function ajax_save_manual_feed() {
-        check_ajax_referer('ppps_stats_nonce', 'nonce');
-
-        if (!current_user_can('manage_options')) {
-            wp_send_json_error('Unauthorized');
-        }
-
         $feed_url = isset($_POST['feed_url']) ? esc_url_raw($_POST['feed_url']) : '';
         $podcast_name = isset($_POST['podcast_name']) ? sanitize_text_field($_POST['podcast_name']) : '';
-
         if (empty($feed_url) || empty($podcast_name)) {
-            wp_send_json_error('Feed URL and Podcast Name are required.');
+            wp_send_json_error(__('Feed URL and Podcast Name are required.', 'powerpress-podcast-stats'));
+        }
+        $feed_url = rtrim($feed_url, '/');
+        global $wpdb;
+        $exists = $wpdb->get_var($wpdb->prepare(
+            "SELECT id FROM {$this->feeds_table} WHERE feed_url = %s OR feed_url = %s", $feed_url, $feed_url . '/'
+        ));
+        if ($exists) {
+            wp_send_json_error(__('This feed URL is already registered.', 'powerpress-podcast-stats'));
         }
 
-        // Extract slug from URL
-        $parsed_url = parse_url($feed_url);
-        $path = isset($parsed_url['path']) ? trim($parsed_url['path'], '/') : '';
-        $path_parts = explode('/', $path);
-
-        // Try to extract feed slug
-        $feed_slug = '';
-        if (in_array('feed', $path_parts)) {
-            $feed_key = array_search('feed', $path_parts);
-            if (isset($path_parts[$feed_key + 1])) {
-                $feed_slug = $path_parts[$feed_key + 1];
+        $feed_slug = sanitize_title($podcast_name);
+        $original_slug = $feed_slug;
+        $counter = 1;
+        while ($wpdb->get_var($wpdb->prepare("SELECT id FROM {$this->feeds_table} WHERE feed_slug = %s", $feed_slug))) {
+            $feed_slug = $original_slug . '-' . $counter++;
+            if ($counter > 100) {
+                wp_send_json_error(__('Unable to generate unique feed slug.', 'powerpress-podcast-stats'));
+                return;
             }
         }
 
-        if (empty($feed_slug)) {
-            $feed_slug = sanitize_title($podcast_name);
-        }
-
-        global $wpdb;
-
-        // Check if already exists
-        $exists = $wpdb->get_var($wpdb->prepare(
-            "SELECT id FROM {$this->feeds_table} WHERE feed_slug = %s",
-            $feed_slug
-        ));
-
-        if ($exists) {
-            wp_send_json_error('This feed is already registered.');
-        }
-
-        // Insert the feed
         $result = $wpdb->insert(
             $this->feeds_table,
-            array(
-                'podcast_name' => $podcast_name,
-                'feed_url' => $feed_url,
-                'feed_slug' => $feed_slug,
-                'source' => 'manual',
-                'created_at' => current_time('mysql')
-            ),
+            array('podcast_name' => $podcast_name, 'feed_url' => $feed_url, 'feed_slug' => $feed_slug, 'thumbnail_url' => '', 'created_at' => current_time('mysql')),
             array('%s', '%s', '%s', '%s', '%s')
         );
 
         if ($result) {
+            $podcast_id = $wpdb->insert_id;
+            $episodes_count = $this->ppps_parse_feed($feed_url, $podcast_id);
+            $feed = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->feeds_table} WHERE id = %d", $podcast_id));
             wp_send_json_success(array(
-                'message' => 'Feed registered successfully!',
-                'feed' => array(
-                    'id' => $wpdb->insert_id,
-                    'podcast_name' => $podcast_name,
-                    'feed_url' => $feed_url,
-                    'feed_slug' => $feed_slug
-                )
+                'message' => __('Feed added successfully!', 'powerpress-podcast-stats') . ' ' . sprintf(__('%d episodes imported.', 'powerpress-podcast-stats'), $episodes_count),
+                'feed' => $feed
             ));
         } else {
-            wp_send_json_error('Error saving feed to database.');
+            wp_send_json_error(__('Error saving feed to database.', 'powerpress-podcast-stats'));
         }
+    }
+
+    public function ppps_ajax_delete_feed() {
+        check_ajax_referer('ppps_stats_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(__('Unauthorized', 'powerpress-podcast-stats'));
+        }
+        $feed_id = isset($_POST['feed_id']) ? intval($_POST['feed_id']) : 0;
+        if ($feed_id <= 0) {
+            wp_send_json_error(__('Invalid feed ID.', 'powerpress-podcast-stats'));
+        }
+        global $wpdb;
+        $wpdb->delete($this->episodes_table, array('podcast_id' => $feed_id), array('%d'));
+        $wpdb->delete($this->table_name, array('podcast_id' => $feed_id), array('%d'));
+        $result = $wpdb->delete($this->feeds_table, array('id' => $feed_id), array('%d'));
+
+        if ($result) {
+            wp_send_json_success(array('message' => __('Feed removed from statistics successfully!', 'powerpress-podcast-stats')));
+        } else {
+            wp_send_json_error(__('Error removing feed.', 'powerpress-podcast-stats'));
+        }
+    }
+
+    public function ppps_ajax_refresh_episodes() {
+        check_ajax_referer('ppps_stats_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(__('Unauthorized', 'powerpress-podcast-stats'));
+        }
+        global $wpdb;
+        $podcast_id = isset($_POST['podcast_id']) ? intval($_POST['podcast_id']) : 0;
+        if ($podcast_id <= 0) {
+            wp_send_json_error(__('Invalid podcast ID', 'powerpress-podcast-stats'));
+        }
+        $feed = $wpdb->get_row($wpdb->prepare("SELECT * FROM {$this->feeds_table} WHERE id = %d", $podcast_id));
+        if (!$feed) {
+            wp_send_json_error(__('Feed not found', 'powerpress-podcast-stats'));
+        }
+        $episodes_count = $this->ppps_parse_feed($feed->feed_url, $podcast_id);
+        wp_send_json_success(array('message' => sprintf(__('%d episodes refreshed.', 'powerpress-podcast-stats'), $episodes_count)));
     }
 }
 
-// Initialize the plugin
-PowerPress_Podcast_Stats::get_instance();
+PowerPress_Podcast_Stats::ppps_get_instance();

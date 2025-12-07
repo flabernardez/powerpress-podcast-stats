@@ -1,0 +1,207 @@
+# This file is distributed under the GPL v2 or later.
+msgid ""
+msgstr ""
+"Project-Id-Version: PowerPress Podcast Stats 1.2.0\n"
+"Report-Msgid-Bugs-To: https://flabernardez.com\n"
+"POT-Creation-Date: 2024-12-07 14:00:00+00:00\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: powerpress-podcast-stats.php:67
+msgid "Podcast Stats"
+msgstr ""
+
+#: powerpress-podcast-stats.php:298
+msgid "Unauthorized"
+msgstr ""
+
+#: powerpress-podcast-stats.php:449
+msgid "Feed URL and Podcast Name are required."
+msgstr ""
+
+#: powerpress-podcast-stats.php:460
+msgid "This feed URL is already registered."
+msgstr ""
+
+#: powerpress-podcast-stats.php:487
+msgid "Feed added successfully!"
+msgstr ""
+
+#: powerpress-podcast-stats.php:498
+msgid "Error saving feed to database."
+msgstr ""
+
+#: powerpress-podcast-stats.php:517
+msgid "Invalid feed ID."
+msgstr ""
+
+#: powerpress-podcast-stats.php:538
+msgid "Feed deleted successfully!"
+msgstr ""
+
+#: powerpress-podcast-stats.php:541
+msgid "Error deleting feed."
+msgstr ""
+
+#: templates/admin-page.php:2
+msgid "PowerPress Podcast Statistics"
+msgstr ""
+
+#: templates/admin-page.php:6
+msgid "Add Podcast Feed"
+msgstr ""
+
+#: templates/admin-page.php:10
+msgid "Feed URL"
+msgstr ""
+
+#: templates/admin-page.php:13
+msgid "Enter the full URL of your podcast feed"
+msgstr ""
+
+#: templates/admin-page.php:18
+msgid "Podcast Name"
+msgstr ""
+
+#: templates/admin-page.php:20
+msgid "My Podcast"
+msgstr ""
+
+#: templates/admin-page.php:21
+msgid "A friendly name to identify this podcast"
+msgstr ""
+
+#: templates/admin-page.php:26
+msgid "Add Feed"
+msgstr ""
+
+#: templates/admin-page.php:34
+msgid "Registered Podcast Feeds"
+msgstr ""
+
+#: templates/admin-page.php:38
+msgid "Added"
+msgstr ""
+
+#: templates/admin-page.php:39
+msgid "Actions"
+msgstr ""
+
+#: templates/admin-page.php:48
+msgid "Delete"
+msgstr ""
+
+#: templates/admin-page.php:59
+msgid "Podcast:"
+msgstr ""
+
+#: templates/admin-page.php:61
+msgid "All Podcasts"
+msgstr ""
+
+#: templates/admin-page.php:78
+msgid "Time Period:"
+msgstr ""
+
+#: templates/admin-page.php:80
+msgid "All Time"
+msgstr ""
+
+#: templates/admin-page.php:81
+msgid "Last Week"
+msgstr ""
+
+#: templates/admin-page.php:82
+msgid "Last Month"
+msgstr ""
+
+#: templates/admin-page.php:83
+msgid "Last Year"
+msgstr ""
+
+#: templates/admin-page.php:84
+msgid "Custom Range"
+msgstr ""
+
+#: templates/admin-page.php:89
+msgid "From:"
+msgstr ""
+
+#: templates/admin-page.php:92
+msgid "To:"
+msgstr ""
+
+#: templates/admin-page.php:96
+msgid "Apply Filters"
+msgstr ""
+
+#: templates/admin-page.php:100
+msgid "Refresh"
+msgstr ""
+
+#: templates/admin-page.php:106
+msgid "Loading statistics..."
+msgstr ""
+
+#: templates/admin-page.php:117
+msgid "Total Feed Accesses"
+msgstr ""
+
+#: templates/admin-page.php:126
+msgid "Accesses by Feed"
+msgstr ""
+
+#: templates/admin-page.php:128 templates/admin-page.php:136
+#: templates/admin-page.php:146 templates/admin-page.php:154
+#: templates/admin-page.php:162
+msgid "No data available"
+msgstr ""
+
+#: templates/admin-page.php:134
+msgid "Accesses by Country"
+msgstr ""
+
+#: templates/admin-page.php:144
+msgid "Accesses by City"
+msgstr ""
+
+#: templates/admin-page.php:152
+msgid "Top Podcast Apps / Clients"
+msgstr ""
+
+#: templates/admin-page.php:160
+msgid "Accesses Timeline (Last 30 Days)"
+msgstr ""
+
+#: templates/admin-page.php:170
+msgid "About These Statistics"
+msgstr ""
+
+#: templates/admin-page.php:172
+msgid "Statistics are collected only for feeds you manually add above."
+msgstr ""
+
+#: templates/admin-page.php:173
+msgid "Each unique IP is counted once per hour per feed to avoid duplicates."
+msgstr ""
+
+#: templates/admin-page.php:174
+msgid "IPs are hashed for privacy - only location data (country and city) is stored."
+msgstr ""
+
+#: templates/admin-page.php:175
+msgid "Geolocation data is provided by ip-api.com (free service)."
+msgstr ""
+
+#: templates/admin-page.php:176
+msgid "Podcast apps cache feeds, so not every play is counted - only feed fetches."
+msgstr ""
+
+#: templates/admin-page.php:184
+msgid "No podcast feeds registered yet"
+msgstr ""
+
+#: templates/admin-page.php:185
+msgid "Add your first podcast feed above to start tracking statistics."
+msgstr ""
